@@ -1,122 +1,117 @@
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits } = require('discord.js');
+const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
-const crypto = require('crypto');
 
-// Configuración del servidor Express (API para la web)
+// Configuración del servidor Express para la página web
 const app = express();
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
-// Listas de seguridad en memoria
-const activeKeys = new Set();    // Almacena los hashes SHA-256 de las keys válidas
-const userCooldowns = new Map(); // Guarda la última fecha en que un usuario pidió una key
+// Puerto dinámico para Render
+const PORT = process.env.PORT || 10000;
 
-// Función para cifrar en SHA-256
-function sha256(text) {
-    return crypto.createHash('sha256').update(text).digest('hex');
-}
-
-// ENDPOINT: Tu página web en Netlify consultará aquí para validar la key
-app.post('/api/verify-key', (req, res) => {
-    const { key } = req.body;
-    if (!key) return res.status(400).json({ success: false, message: "Key no proporcionada" });
-
-    const hashedInput = sha256(key.trim());
-
-    if (activeKeys.has(hashedInput)) {
-        // La key es válida, la eliminamos para que no se pueda volver a usar (se "quema")
-        activeKeys.delete(hashedInput);
-        return res.json({ success: false, message: "Key válida" }); // Espera, aquí debe ser true:
-    }
-    // Corrección rápida de retorno positivo:
-    // (Asegúrate de que devuelva success: true si se encuentra)
-    
-    // Si no está en el Set:
-    return res.status(401).json({ success: false, message: "Key inválida o ya utilizada" });
-});
-
-// Ajuste para el endpoint correcto de éxito:
-app.post('/api/verify-key', (req, res) => {
-    const { key } = req.body;
-    if (!key) return res.status(400).json({ success: false, message: "Key no proporcionada" });
-
-    const hashedInput = sha256(key.trim());
-
-    if (activeKeys.has(hashedInput)) {
-        activeKeys.delete(hashedInput);
-        return res.json({ success: true, message: "Key válida" });
-    }
-
-    return res.status(401).json({ success: false, message: "Key inválida o ya utilizada" });
-});
+// Base de datos temporal en memoria para las Keys y los tiempos de cada usuario
+// Estructura: userId -> { keyHashed, expiresAt }
+const activeKeys = new Map();
 
 // Configuración del Bot de Discord
-const client = new Client({ 
+const client = new Client({
     intents: [
-        GatewayIntentBits.Guilds, 
-        GatewayIntentBits.GuildMessages, 
-        GatewayIntentBits.MessageContent
-    ] 
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.DirectMessages
+    ]
 });
 
-client.once('ready', () => {
-    console.log(`🤖 ¡Bot conectado como ${client.user.tag}!`);
+client.on('ready', () => {
+    console.log(`Bot encendido y conectado como ${client.user.tag}`);
 });
 
-client.on('messageCreate', async message => {
+// Evento cuando un usuario escribe en el chat o por DM
+client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    // Comando para solicitar la Key diaria
-    if (message.content === '!key' || message.content === '!pedirkey') {
+    // Comando para solicitar la key
+    if (message.content.trim() === '!key') {
         const userId = message.author.id;
-        const ahora = Date.now();
-        const unDiaEnMs = 24 * 60 * 60 * 1000; // 24 horas
+        const now = Date.now();
+        const cooldownTime = 24 * 60 * 60 * 1000; // 24 horas en milisegundos
 
-        // Verificar si ya pidió su key en las últimas 24 horas
-        if (userCooldowns.has(userId)) {
-            const ultimaVez = userCooldowns.get(userId);
-            const tiempoPasado = ahora - ultimaVez;
-
-            if (tiempoPasado < unDiaEnMs) {
-                const horasRestantes = Math.ceil((unDiaEnMs - tiempoPasado) / (1000 * 60 * 60));
-                return message.reply(`❌ Ya reclamaste tu key hoy. Vuelve a intentarlo en **${horasRestantes} horas**.`);
+        // Verificar si el usuario ya tiene una key activa y no han pasado 24 horas
+        if (activeKeys.has(userId)) {
+            const userData = activeKeys.get(userId);
+            if (now < userData.expiresAt) {
+                const timeLeftMinutes = Math.ceil((userData.expiresAt - now) / (1000 * 60));
+                const hours = Math.floor(timeLeftMinutes / 60);
+                const minutes = timeLeftMinutes % 60;
+                
+                return message.author.send(`⚠️ Ya tienes una Key activa. Puedes solicitar otra en **${hours} horas y ${minutes} minutos**.`);
             }
         }
 
-        // Generar Key única
-        const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-        const rawKey = `109-DC-${randomCode}-X`;
+        // Generar una Key única y segura para este usuario específico
+        const rawKey = `109-FF-${crypto.randomBytes(4).toString('hex').toUpperCase()}-X`;
+        const hashedKey = crypto.createHash('sha256').update(rawKey).digest('hex');
 
-        // Guardar el hash SHA-256 de la key en la lista de válidas del servidor
-        const hashedKey = sha256(rawKey);
-        activeKeys.add(hashedKey);
+        // Guardar la key en la memoria con expiración de 24 horas
+        activeKeys.set(userId, {
+            keyHashed: hashedKey,
+            expiresAt: now + cooldownTime
+        });
 
-        // Actualizar el tiempo del usuario
-        userCooldowns.set(userId, ahora);
-
-        // Enviar la key por Mensaje Privado (DM)
         try {
-            const embed = new EmbedBuilder()
-                .setColor('#00f2fe')
-                .setTitle('🔑 Tu Key Diaria - 109 Cheats')
-                .setDescription(`Aquí tienes tu key exclusiva generada por el bot:\n\n\`\`\`${rawKey}\`\`\`\n*Esta key es personal, de un solo uso y expira al utilizarse.*`)
-                .setFooter({ text: 'Sistema de Seguridad 109 Cheats' })
-                .setTimestamp();
-
-            await message.author.send({ embeds: [embed] });
-            message.reply('✅ ¡Te he enviado tu key por mensaje privado (DM)!');
-        } catch (error) {
-            message.reply('❌ No pude enviarte un mensaje privado. Asegúrate de tener los DMs abiertos en este servidor.');
+            // Enviar la Key por Mensaje Directo (DM)
+            await message.author.send(
+                `🔐 **Tu System Key personal de 109 Cheats:**\n\`\`\`${rawKey}\`\`\`\n*Esta key es de uso personal, expira en 24 horas y solo puede usarse una vez.*`
+            );
+            
+            if (message.channel.type !== 1) { // Si no fue en DM, avisar en el canal
+                await message.reply('✅ ¡Te he enviado tu Key por Mensaje Directo (DM)! Revisa tus mensajes.');
+            }
+        } catch (err) {
+            message.reply('❌ No pude enviarte un mensaje directo. Asegúrate de tener los MDs abiertos en este servidor.');
         }
     }
 });
 
-// Iniciar servidor
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`🌐 Servidor corriendo en el puerto ${PORT}`);
+// Ruta de la API que consulta la página web de Netlify para validar la Key
+app.post('/api/verify-key', (req, res) => {
+    const { key } = req.body;
+    if (!key) {
+        return res.status(400).json({ success: false, message: 'Key no proporcionada.' });
+    }
+
+    // Hashear la key que ingresó el usuario en la web para compararla con la base de datos
+    const inputHash = crypto.createHash('sha256').update(key.trim()).digest('hex');
+    const now = Date.now();
+
+    let foundValid = false;
+
+    // Buscar si la key existe y sigue vigente en el sistema
+    for (const [userId, data] of activeKeys.entries()) {
+        if (data.keyHashed === inputHash) {
+            if (now < data.expiresAt) {
+                foundValid = true;
+                // Opcional: Eliminar la key después de usarse si es de un solo uso
+                activeKeys.delete(userId); 
+            }
+            break;
+        }
+    }
+
+    if (foundValid) {
+        return res.json({ success: true, message: 'Acceso concedido.' });
+    } else {
+        return res.status(401).json({ success: false, message: 'Key inválida, expirada o ya utilizada.' });
+    }
 });
 
-// Iniciar sesión con el token de Discord
+// Iniciar servidor Express
+app.listen(PORT, () => {
+    console.log(`Servidor corriendo en el puerto ${PORT}`);
+});
+
+// Iniciar sesión del Bot con el token de entorno de Render
 client.login(process.env.DISCORD_TOKEN);
