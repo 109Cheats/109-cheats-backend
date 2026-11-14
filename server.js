@@ -85,9 +85,11 @@ app.post('/api/verify-key', (req, res) => {
     }
 });
 
+// Iniciar sesión con el token de Discord que está en las variables de entorno de Render
 client.login(process.env.DISCORD_TOKEN);
 
+// Encender el servidor Express
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-    console.log(`Servidor de 109 Cheats corriendo en el puerto ${PORT}`);
+    console.log(`Servidor corriendo en el puerto ${PORT}`);
 });
