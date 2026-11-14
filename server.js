@@ -19,10 +19,16 @@ const client = new Client({
     ]
 });
 
+// Evento cuando el bot enciende correctamente
+client.once('ready', () => {
+    console.log(`Bot conectado exitosamente como ${client.user.tag}`);
+});
+
+// Evento cuando recibe un mensaje
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    if (message.content === '!key') {
+    if (message.content.trim() === '!key') {
         try {
             const userId = message.author.id;
             const now = Date.now();
@@ -52,44 +58,61 @@ client.on('messageCreate', async (message) => {
             
         } catch (error) {
             console.error('Error al enviar DM:', error);
-            await message.reply('❌ No pude enviarte el mensaje directo. Asegúrate de tener los DMs abiertos.');
+            try {
+                await message.reply('❌ No pude enviarte el mensaje directo. Asegúrate de tener los DMs abiertos.');
+            } catch (e) {
+                // Ignorar
+            }
         }
     }
+});
+
+// Ruta de prueba
+app.get('/', (req, res) => {
+    res.send('Backend de 109 Cheats activo y funcionando.');
 });
 
 // Ruta que consulta Netlify para verificar la key
 app.post('/api/verify-key', (req, res) => {
-    const { key } = req.body;
-    
-    if (!key) {
-        return res.status(400).json({ success: false, message: 'Key no proporcionada.' });
-    }
-
-    const now = Date.now();
-    let keyEncontrada = false;
-
-    // Buscar si la key existe y sigue vigente en el mapa
-    for (const [userId, data] of activeKeys.entries()) {
-        if (data.key === key) {
-            if (now < data.expiresAt) {
-                keyEncontrada = true;
-            }
-            break;
+    try {
+        const { key } = req.body;
+        
+        if (!key) {
+            return res.status(400).json({ success: false, message: 'Key no proporcionada.' });
         }
-    }
 
-    if (keyEncontrada) {
-        return res.json({ success: true, message: 'Key válida.' });
-    } else {
-        return res.status(401).json({ success: false, message: 'Key inválida o expirada.' });
+        const now = Date.now();
+        let keyEncontrada = false;
+
+        for (const [userId, data] of activeKeys.entries()) {
+            if (data.key.trim() === key.trim()) {
+                if (now < data.expiresAt) {
+                    keyEncontrada = true;
+                }
+                break;
+            }
+        }
+
+        if (keyEncontrada) {
+            return res.json({ success: true, message: 'Key válida.' });
+        } else {
+            return res.status(401).json({ success: false, message: 'Key inválida o expirada.' });
+        }
+    } catch (err) {
+        console.error('Error en /api/verify-key:', err);
+        return res.status(500).json({ success: false, message: 'Error interno en el servidor.' });
     }
 });
 
-// Iniciar sesión con el token de Discord que está en las variables de entorno de Render
-client.login(process.env.DISCORD_TOKEN);
+// Iniciar sesión del bot de Discord usando la variable de entorno
+if (process.env.DISCORD_TOKEN) {
+    client.login(process.env.DISCORD_TOKEN);
+} else {
+    console.error('ERROR CRÍTICO: Falta la variable de entorno DISCORD_TOKEN en Render.');
+}
 
-// Encender el servidor Express
+// Encender el servidor Express para Render
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-    console.log(`Servidor corriendo en el puerto ${PORT}`);
+    console.log(`Servidor de 109 Cheats corriendo en el puerto ${PORT}`);
 });
