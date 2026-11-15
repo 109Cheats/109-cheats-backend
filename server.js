@@ -92,9 +92,13 @@ if (!process.env.DISCORD_TOKEN) {
     console.error('ERROR: Falta el DISCORD_TOKEN en las variables de entorno de Render.');
 } else {
     console.log('Intentando conectar el bot de Discord...');
-    client.login(process.env.DISCORD_TOKEN).catch(err => {
-        console.error('ERROR CRÍTICO AL INICIAR SESIÓN EN DISCORD:', err);
-    });
+    client.login(process.env.DISCORD_TOKEN)
+        .then(() => {
+            console.log('¡Conexión establecida con la API de Discord exitosamente!');
+        })
+        .catch(err => {
+            console.error('❌ ERROR CRÍTICO AL INICIAR SESIÓN EN DISCORD:', err);
+        });
 }
 
 // Servidor Express
